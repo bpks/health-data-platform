@@ -87,7 +87,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # The plan file can contain resolved values, so it is kept briefly and only to apply this exact plan.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: tfplan-${{ inputs.environment }}
           path: infra/terraform/tfplan
