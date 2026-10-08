@@ -1,0 +1,115 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: python (py${{ matrix.python }}, pyspark ${{ matrix.pyspark }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The two Spark lines in use: Fabric/Databricks LTS runtimes (3.5) and current (4.x).
+          - python: "3.11"
+            pyspark: "3.5.*"
+          - python: "3.12"
+            pyspark: "4.*"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" "pyspark==${{ matrix.pyspark }}"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Tests
+        run: pytest
+
+  sql:
+    name: t-sql lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install sqlfluff
+      - run: sqlfluff lint sql
+
+  terraform:
+    name: terraform (fmt, validate, static checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Format
+        run: terraform fmt -check -recursive infra/terraform
+      - name: Validate (no backend, no credentials needed)
+        run: |
+          terraform -chdir=infra/terraform init -backend=false -input=false
+          terraform -chdir=infra/terraform validate
+      - name: Static cross-checks
+        run: |
+          python -m pip install "python-hcl2>=4.3"
+          python scripts/check_terraform_static.py
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Experimental: runs the Delta Lake code path, which needs Delta jars from Maven Central. Kept
+  # non-blocking until it has a track record on the runner. Failures here are visible, not hidden.
+  delta:
+    name: delta (experimental)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: python -m pip install -e ".[dev,delta]" "pyspark==3.5.*" "delta-spark==3.2.*"
+      - run: HDP_TEST_DELTA=1 pytest tests/test_delta_optional.py

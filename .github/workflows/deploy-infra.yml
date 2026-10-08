@@ -1,0 +1,60 @@
+name: deploy-infra
+
+# Pull request  -> plan dev only, so reviewers see exactly what would change.
+# Merge to main -> dev, then test, then prod. Each stage plans, then (for test and prod) waits for a reviewer
+# on the "<env>-approval" GitHub Environment, then applies exactly the plan that was reviewed.
+# See terraform-env.yml for the three-job design and the GitHub Environments it expects.
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - "monitoring/kql/**"
+      - ".github/workflows/deploy-infra.yml"
+      - ".github/workflows/terraform-env.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "monitoring/kql/**"
+      - ".github/workflows/deploy-infra.yml"
+      - ".github/workflows/terraform-env.yml"
+  workflow_dispatch:
+
+# Never run two applies at once, and never cancel one halfway through.
+concurrency:
+  group: deploy-infra
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+# Safety switch: nothing below runs until the repository variable DEPLOY_ENABLED is set to "true", which should
+# only happen after the Azure side (federated credentials, GitHub Environments, state storage) is in place.
+# Until then every job is skipped rather than failing for lack of credentials.
+jobs:
+  dev:
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    uses: ./.github/workflows/terraform-env.yml
+    with:
+      environment: dev
+      apply: ${{ github.event_name != 'pull_request' }}
+
+  test:
+    needs: dev
+    if: ${{ vars.DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' }}
+    uses: ./.github/workflows/terraform-env.yml
+    with:
+      environment: test
+      apply: true
+      require_approval: true
+
+  prod:
+    needs: test
+    if: ${{ vars.DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' }}
+    uses: ./.github/workflows/terraform-env.yml
+    with:
+      environment: prod
+      apply: true
+      require_approval: true

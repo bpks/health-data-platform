@@ -1,0 +1,6 @@
+// COST: which data types are driving Log Analytics ingestion (the bill) over the last 30 days.
+// Pair with the daily ingestion cap in infra/terraform (log_daily_quota_gb).
+Usage
+| where TimeGenerated > ago(30d) and IsBillable == true
+| summarize billable_gb = round(sum(Quantity) / 1024.0, 2) by DataType, day = bin(TimeGenerated, 1d)
+| order by day desc, billable_gb desc

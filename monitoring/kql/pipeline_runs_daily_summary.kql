@@ -1,0 +1,13 @@
+// INVESTIGATION: daily health of every pipeline over two weeks: volume, failures, success rate and
+// typical vs worst-case duration. The first query to run when someone asks "has it been flaky?".
+ADFPipelineRun
+| where TimeGenerated > ago(14d) and Status in ("Succeeded", "Failed", "Cancelled")
+| extend duration_min = datetime_diff("minute", End, Start)
+| summarize
+    runs = count(),
+    failed = countif(Status == "Failed"),
+    p50_minutes = percentile(duration_min, 50),
+    p95_minutes = percentile(duration_min, 95)
+    by PipelineName, day = bin(TimeGenerated, 1d)
+| extend success_rate_pct = round(100.0 * (runs - failed) / runs, 1)
+| order by day desc, PipelineName asc

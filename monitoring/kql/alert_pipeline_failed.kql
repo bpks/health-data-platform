@@ -1,0 +1,5 @@
+// ALERT (severity 1): a pipeline run failed. Evaluated every 5 minutes over a 15 minute window.
+// Deployed by infra/terraform/monitoring.tf. Rows returned = failures, so the rule is Count > 0.
+ADFPipelineRun
+| where Status == "Failed"
+| project TimeGenerated, PipelineName, RunId, FailureType, End

@@ -1,0 +1,7 @@
+// INVESTIGATION / SECURITY: deletions in the lake over the last week, by hour, caller and outcome.
+// Bronze is append-only by design, so a burst of deletes needs an explanation. Soft delete (14 days)
+// means most accidental deletions can still be recovered; check before anything is rewritten.
+StorageBlobLogs
+| where TimeGenerated > ago(7d) and OperationName has "Delete"
+| summarize deletes = count() by hour = bin(TimeGenerated, 1h), CallerIpAddress, AuthenticationType, StatusText
+| order by hour desc

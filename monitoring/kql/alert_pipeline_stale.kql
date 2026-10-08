@@ -1,0 +1,8 @@
+// ALERT (severity 2): the daily pipeline has not succeeded recently. Evaluated hourly over 2 days.
+// Catches the silent failure: nothing errored, but nothing ran (disabled trigger, expired credential,
+// upstream extract never arrived). A failure alert alone cannot see that.
+let pipeline = "pl_hdp_daily";
+ADFPipelineRun
+| where PipelineName == pipeline and Status == "Succeeded"
+| summarize last_success = max(End)
+| where isnull(last_success) or last_success < ago(26h)

@@ -1,0 +1,148 @@
+name: terraform-env
+
+# Reusable workflow: plan (and optionally apply) the infrastructure for ONE environment.
+#
+# Authentication is OpenID Connect federation: GitHub mints a short-lived token and Azure trusts it for this
+# repository and environment. There is no client secret stored anywhere.
+#
+# Three jobs, so that a human approves AFTER reading the plan, not before it exists:
+#   plan     read-only plan; the full text is written to the job summary and the plan file is kept as an artifact
+#   approve  an empty job that only exists to wait on the protected "<env>-approval" GitHub Environment
+#   apply    applies exactly the plan file that was produced and reviewed (not a fresh plan)
+#
+# GitHub Environments to create (Settings > Environments):
+#   dev, test, prod                      hold the variables below; NO protection rules (plan/apply run here)
+#   test-approval, prod-approval         "Required reviewers" on; no variables needed
+# Variables on dev, test and prod:
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID   (identifiers, not secrets)
+#   TFSTATE_RESOURCE_GROUP, TFSTATE_STORAGE_ACCOUNT           (where remote state lives)
+# The Azure federated credential must trust the dev, test and prod environments.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      apply:
+        description: Apply after planning. When false, only plan.
+        type: boolean
+        default: false
+      require_approval:
+        description: Wait for reviewers on the "<environment>-approval" GitHub Environment before applying.
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  ARM_USE_OIDC: "true"
+
+jobs:
+  plan:
+    name: plan (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: infra/terraform
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Init (remote state, one state file per environment)
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=${{ inputs.environment }}.tfstate" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Plan
+        run: |
+          terraform plan -input=false -lock-timeout=5m -out=tfplan \
+            -var-file="envs/${{ inputs.environment }}.tfvars" \
+            -var="subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}"
+
+      - name: Plan summary (the change record a reviewer reads)
+        run: |
+          {
+            echo "### Terraform plan: ${{ inputs.environment }}"
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The plan file can contain resolved values, so it is kept briefly and only to apply this exact plan.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: infra/terraform/tfplan
+          retention-days: 3
+
+  approve:
+    name: approve (${{ inputs.environment }})
+    needs: plan
+    if: ${{ inputs.apply && inputs.require_approval }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440 # a day, so an out-of-hours plan can wait for the morning
+    environment: ${{ inputs.environment }}-approval
+    steps:
+      - run: echo "Plan for ${{ inputs.environment }} approved. See the plan job summary for what will change."
+
+  apply:
+    name: apply (${{ inputs.environment }})
+    needs: [plan, approve]
+    # approve is skipped (not failed) when no approval is required; any other outcome blocks the apply.
+    if: ${{ always() && inputs.apply && needs.plan.result == 'success' && (needs.approve.result == 'success' || needs.approve.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: terraform-apply-${{ inputs.environment }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/terraform
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: infra/terraform
+
+      - name: Init
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=${{ inputs.environment }}.tfstate" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true"
+
+      # If state changed since the plan was made, Terraform refuses a stale plan file. That is the desired outcome.
+      - name: Apply the plan that was reviewed
+        run: terraform apply -input=false tfplan

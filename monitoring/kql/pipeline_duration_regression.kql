@@ -1,0 +1,15 @@
+// INVESTIGATION: pipelines that have become slower. Compares the last 7 days with the 21 days before.
+// A pipeline getting slower is capacity, data growth or a plan regression: find out which before
+// scaling anything up (see docs/cost-and-capacity.md).
+let recent = ADFPipelineRun
+    | where TimeGenerated > ago(7d) and Status == "Succeeded"
+    | summarize recent_avg_min = avg(datetime_diff("minute", End, Start)), recent_runs = count() by PipelineName;
+let baseline = ADFPipelineRun
+    | where TimeGenerated between (ago(28d) .. ago(7d)) and Status == "Succeeded"
+    | summarize baseline_avg_min = avg(datetime_diff("minute", End, Start)) by PipelineName;
+recent
+| join kind=inner baseline on PipelineName
+| extend slowdown_factor = round(recent_avg_min / baseline_avg_min, 2)
+| where recent_runs >= 3 and slowdown_factor > 1.5
+| project PipelineName, baseline_avg_min = round(baseline_avg_min, 1), recent_avg_min = round(recent_avg_min, 1), slowdown_factor, recent_runs
+| order by slowdown_factor desc

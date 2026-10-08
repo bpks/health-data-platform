@@ -1,0 +1,10 @@
+// INVESTIGATION / SECURITY: who is touching secrets, from where. Expected callers are the pipeline's
+// managed identity and the engineer group. A new caller IP, or any SecretSet/SecretDelete outside a
+// change window, is worth a question.
+AzureDiagnostics
+| where TimeGenerated > ago(7d)
+| where ResourceProvider == "MICROSOFT.KEYVAULT" and Category == "AuditEvent"
+| where OperationName in ("SecretGet", "SecretList", "SecretSet", "SecretDelete")
+| summarize operations = count(), first_seen = min(TimeGenerated), last_seen = max(TimeGenerated)
+    by OperationName, CallerIPAddress, ResultSignature
+| order by last_seen desc

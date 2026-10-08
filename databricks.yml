@@ -1,0 +1,82 @@
+# Databricks Asset Bundle: releases the pipeline as a versioned wheel plus a scheduled job.
+#
+# STATUS: a template. I could not validate it against a Databricks workspace (no workspace was available
+# when this was written), so run `databricks bundle validate -t dev` before first use. Host names, the
+# service principal and the notification address below are placeholders.
+#
+#   pip install build && databricks bundle deploy -t dev      # deploy
+#   databricks bundle run hdp_daily -t dev                     # run once
+#
+# The pseudonymisation salt comes from a Databricks secret scope (backed by Key Vault), referenced as a
+# cluster environment variable so it never appears in code, logs or this file.
+
+bundle:
+  name: hdp
+
+artifacts:
+  hdp_wheel:
+    type: whl
+    build: python -m build --wheel
+    path: .
+
+variables:
+  lake_base_path:
+    description: abfss:// path of the lake container (Terraform output lake_base_path)
+    default: abfss://lake@REPLACE_ME.dfs.core.windows.net
+
+targets:
+  dev:
+    mode: development # prefixes resources with the user name and pauses schedules
+    default: true
+    workspace:
+      host: https://adb-0000000000000000.0.azuredatabricks.net
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-1111111111111111.1.azuredatabricks.net
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: 00000000-0000-0000-0000-000000000000
+
+resources:
+  jobs:
+    hdp_daily:
+      name: hdp-daily-${bundle.target}
+
+      schedule:
+        quartz_cron_expression: "0 30 5 * * ?" # 05:30 every day
+        timezone_id: Europe/London
+        pause_status: UNPAUSED
+
+      email_notifications:
+        on_failure:
+          - platform-alerts@example.org
+
+      job_clusters:
+        - job_cluster_key: pipeline
+          new_cluster:
+            spark_version: 15.4.x-scala2.12
+            node_type_id: Standard_DS3_v2
+            autoscale:
+              min_workers: 1
+              max_workers: 4
+            # Cost control: spot capacity with an on-demand fallback; job clusters terminate when the run ends.
+            azure_attributes:
+              availability: SPOT_WITH_FALLBACK_AZURE
+              first_on_demand: 1
+            spark_env_vars:
+              HDP_ENV: ${bundle.target}
+              HDP_BASE_PATH: ${var.lake_base_path}
+              HDP_FORMAT: delta
+              HDP_PSEUDO_SALT: "{{secrets/hdp/pseudo-salt}}"
+
+      tasks:
+        - task_key: pipeline
+          job_cluster_key: pipeline
+          python_wheel_task:
+            package_name: hdp
+            entry_point: hdp-run
+            parameters: ["--stage", "all"]
+          libraries:
+            - whl: ./dist/*.whl

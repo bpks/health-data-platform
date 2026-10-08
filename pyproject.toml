@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hdp"
+version = "0.1.0"
+description = "Synthetic health-research data platform: medallion pipeline, data quality, privacy controls, platform as code"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pyspark>=3.5,<5"]
+
+[project.optional-dependencies]
+# Delta Lake support. Fabric and Databricks already ship Delta, so this is only
+# needed to run HDP_FORMAT=delta on a laptop or in CI.
+delta = ["delta-spark>=3.2"]
+dev = ["pytest>=8", "ruff>=0.6", "sqlfluff>=3.0", "python-hcl2>=4.3"]
+
+[project.scripts]
+hdp-run = "hdp.run:main"
+hdp-generate = "hdp.generate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# The notebook configures sys.path / the environment before importing the package, on purpose.
+"notebooks/*" = ["E402"]
+
+[tool.sqlfluff.core]
+dialect = "tsql"
+exclude_rules = "LT05,AM04,RF02,RF04,ST06,ST09,CP01,CP02,CP03,CP05,LT01,LT02,LT11,LT14"
+max_line_length = 120

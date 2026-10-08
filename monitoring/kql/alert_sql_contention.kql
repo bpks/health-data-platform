@@ -1,0 +1,6 @@
+// ALERT (severity 2): deadlocks or blocking on the serving database.
+// Diagnostic categories are enabled in infra/terraform/monitoring.tf. First response: run
+// sql/ops/04_blocking_and_waits.sql on the database to see the chain and the statements involved.
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.SQL" and Category in ("Deadlocks", "Blocks")
+| project TimeGenerated, Resource, Category, ResourceId

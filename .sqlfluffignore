@@ -1,0 +1,6 @@
+# sqlfluff's T-SQL parser does not understand these two statements, although both are valid T-SQL:
+#   ALTER TABLE ... ALTER COLUMN ... ADD MASKED WITH (FUNCTION = '...')   (dynamic data masking)
+#   EXECUTE AS USER = '...'                                                (impersonation in tests)
+# They are reviewed by eye and exercised by sql/tests/002_rls_and_masking_checks.sql on a real server.
+sql/security/021_dynamic_data_masking.sql
+sql/tests/002_rls_and_masking_checks.sql
