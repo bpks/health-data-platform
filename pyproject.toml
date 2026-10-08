@@ -14,7 +14,7 @@ dependencies = ["pyspark>=3.5,<5"]
 # Delta Lake support. Fabric and Databricks already ship Delta, so this is only
 # needed to run HDP_FORMAT=delta on a laptop or in CI.
 delta = ["delta-spark>=3.2"]
-dev = ["pytest>=8", "ruff>=0.6", "sqlfluff>=3.0", "python-hcl2>=4.3"]
+dev = ["pytest>=8", "ruff>=0.6", "sqlfluff>=4.4.0", "python-hcl2>=4.3"]
 
 [project.scripts]
 hdp-run = "hdp.run:main"
