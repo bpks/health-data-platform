@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Synthetic health-research data platform: medallion pipeline, data quality, privacy controls, platform as code"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["pyspark>=3.5,<5"]
+dependencies = ["pyspark>=4.2.0,<5"]
 
 [project.optional-dependencies]
 # Delta Lake support. Fabric and Databricks already ship Delta, so this is only
